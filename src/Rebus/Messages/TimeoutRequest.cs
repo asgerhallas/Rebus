@@ -20,10 +20,18 @@ namespace Rebus.Messages
         /// </summary>
         public string CorrelationId { get; set; }
 
+    }
+
+    /// <summary>
+    /// Requests a delayed reply from the Timeout Service just like <see cref="TimeoutRequest"/>.
+    /// Now with payload data that will be returned in the <see cref="TimeoutReply"/>
+    /// </summary>
+    public class TimeoutRequest<TData> : TimeoutRequest
+    {
         /// <summary>
         /// Allows for specifying payload data that the Timeout Service will
         /// return with the <see cref="TimeoutReply"/>.
         /// </summary>
-        public string Data { get; set; }
+        public TData Data { get; set; }
     }
 }

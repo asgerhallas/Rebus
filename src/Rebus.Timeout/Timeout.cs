@@ -8,6 +8,7 @@ namespace Rebus.Timeout
         public string CorrelationId { get; set; }
         public DateTime TimeToReturn { get; set; }
         public object Data { get; set; }
+        public Type DataType { get; set; }
 
         public override string ToString()
         {

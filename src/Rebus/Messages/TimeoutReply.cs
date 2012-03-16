@@ -18,9 +18,18 @@ namespace Rebus.Messages
         /// </summary>
         public string CorrelationId { get; set; }
 
+    }
+
+    /// <summary>
+    /// This is the reply that the Timeout Service will send back to the
+    /// timeout requestor upon completion of the timeout.
+    /// The reply will include the payload data sent in the original request.
+    /// </summary>
+    public class TimeoutReply<TData> : TimeoutReply
+    {
         /// <summary>
         /// Payload data as given in the <see cref="TimeoutRequest"/>
         /// </summary>
-        public object Data { get; set; }
+        public TData Data { get; set; }
     }
 }

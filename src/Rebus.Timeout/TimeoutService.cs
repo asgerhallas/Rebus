@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Timers;
 using System.Transactions;
@@ -11,22 +12,20 @@ using Rebus.Messages;
 using Rebus.Serialization.Json;
 using Rebus.Transports.Msmq;
 using log4net;
-using System.Linq;
 using ILog = log4net.ILog;
 
 namespace Rebus.Timeout
 {
     public class TimeoutService : IHandleMessages<TimeoutRequest>, IActivateHandlers
     {
-        readonly IStoreTimeouts storeTimeouts;
-        static readonly ILog Log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
-
         const string InputQueueName = "rebus.timeout";
-        
+        static readonly ILog Log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+        static readonly Type[] IgnoredMessageTypes = new[] {typeof (object), typeof (IRebusControlMessage)};
+
         readonly IBus bus;
-        readonly Timer timer = new Timer();
         readonly RebusBus rebusBus;
-        static readonly Type[] IgnoredMessageTypes = new[]{typeof(object), typeof(IRebusControlMessage)};
+        readonly IStoreTimeouts storeTimeouts;
+        readonly Timer timer = new Timer();
 
         public TimeoutService(IStoreTimeouts storeTimeouts)
         {
@@ -34,7 +33,8 @@ namespace Rebus.Timeout
             var msmqMessageQueue = new MsmqMessageQueue(InputQueueName);
 
             RebusLoggerFactory.Current = new Log4NetLoggerFactory();
-            rebusBus = new RebusBus(this, msmqMessageQueue, msmqMessageQueue, null, null, null, new JsonMessageSerializer(), new TrivialPipelineInspector());
+            rebusBus = new RebusBus(this, msmqMessageQueue, msmqMessageQueue, null, null, null,
+                                    new JsonMessageSerializer(), new TrivialPipelineInspector());
             bus = rebusBus;
 
             timer.Interval = 300;
@@ -48,21 +48,49 @@ namespace Rebus.Timeout
 
         public IEnumerable<IHandleMessages<T>> GetHandlerInstancesFor<T>()
         {
-            if (typeof(T) == typeof(TimeoutRequest))
+            if (typeof (TimeoutRequest).IsAssignableFrom(typeof (T)))
             {
                 return new[] {(IHandleMessages<T>) this};
             }
 
-            if (IgnoredMessageTypes.Contains(typeof(T)))
+            if (IgnoredMessageTypes.Contains(typeof (T)))
             {
                 return new IHandleMessages<T>[0];
             }
 
-            throw new InvalidOperationException(string.Format("Someone took the chance and sent a message of type {0} to me.", typeof(T)));
+            throw new InvalidOperationException(string.Format("Someone took the chance and sent a message of " +
+                                                              "type {0} to me, though I only handle TimeoutRequests.", typeof (T)));
         }
 
         public void Release(IEnumerable handlerInstances)
         {
+        }
+
+        public void Handle(TimeoutRequest message)
+        {
+            var currentMessageContext = MessageContext.GetCurrent();
+
+            var data = GetDataFromTimeoutRequest(message);
+
+            var newTimeout = new Timeout
+                             {
+                                 CorrelationId = message.CorrelationId,
+                                 ReplyTo = currentMessageContext.ReturnAddress,
+                                 TimeToReturn = DateTime.UtcNow + message.Timeout,
+                                 Data = data,
+                                 DataType = data != null ? data.GetType() : null
+                             };
+
+            storeTimeouts.Add(newTimeout);
+
+            Log.InfoFormat("Added new timeout: {0}", newTimeout);
+        }
+
+        static object GetDataFromTimeoutRequest(TimeoutRequest message)
+        {
+            var dataProperty = message.GetType().GetProperty("Data");
+            var data = dataProperty != null ? dataProperty.GetValue(message, null) : null;
+            return data;
         }
 
         public void Start()
@@ -81,23 +109,6 @@ namespace Rebus.Timeout
             rebusBus.Dispose();
         }
 
-        public void Handle(TimeoutRequest message)
-        {
-            var currentMessageContext = MessageContext.GetCurrent();
-
-            var newTimeout = new Timeout
-                                 {
-                                     CorrelationId = message.CorrelationId,
-                                     ReplyTo = currentMessageContext.ReturnAddress,
-                                     TimeToReturn = DateTime.UtcNow + message.Timeout,
-                                     Data = message.Data
-                                 };
-
-            storeTimeouts.Add(newTimeout);
-
-            Log.InfoFormat("Added new timeout: {0}", newTimeout);
-        }
-
         void CheckCallbacks(object sender, ElapsedEventArgs e)
         {
             using (var tx = new TransactionScope())
@@ -108,16 +119,27 @@ namespace Rebus.Timeout
                 {
                     Log.InfoFormat("Timeout!: {0} -> {1}", timeout.CorrelationId, timeout.ReplyTo);
 
-                    bus.Send(timeout.ReplyTo,
-                             new TimeoutReply
-                                 {
-                                     CorrelationId = timeout.CorrelationId,
-                                     DueTime = timeout.TimeToReturn
-                                 });
+                    var reply = CreateTimeoutReply(timeout);
+
+                    reply.CorrelationId = timeout.CorrelationId;
+                    reply.DueTime = timeout.TimeToReturn;
+
+                    bus.Send(timeout.ReplyTo, reply);
                 }
 
                 tx.Complete();
             }
+        }
+
+        static TimeoutReply CreateTimeoutReply(Timeout timeout)
+        {
+            if (timeout.Data == null)
+                return new TimeoutReply();
+
+            var reply = (TimeoutReply) Activator.CreateInstance(typeof (TimeoutReply<>).MakeGenericType(timeout.DataType));
+            var dataProperty = reply.GetType().GetProperty("Data");
+            dataProperty.SetValue(reply, timeout.Data, null);
+            return reply;
         }
     }
 }

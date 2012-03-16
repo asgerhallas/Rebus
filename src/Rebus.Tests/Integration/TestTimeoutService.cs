@@ -50,14 +50,50 @@ namespace Rebus.Tests.Integration
             timeoutExpired.ShouldBe(true);
         }
 
+        [Test]
+        public void WillReturnPayloadData()
+        {
+            var justSomeCorrelationId = Guid.NewGuid().ToString();
+            client.Send(new TimeoutRequest<SomeData>
+                        {
+                            Data = new SomeData
+                                   {
+                                      TheImportantMessage = "Times up"
+                                   },
+                            CorrelationId = justSomeCorrelationId, 
+                            Timeout = 2.Seconds()
+                        });
+            
+            SomeData data = null;
+
+            handlerActivator
+                .Handle<TimeoutReply<SomeData>>(m =>
+                                                {
+                                                    if (m.CorrelationId == justSomeCorrelationId)
+                                                    {
+                                                        data = m.Data;
+                                                    }
+                                                });
+
+            Thread.Sleep(2.5.Seconds());
+            
+            data.ShouldNotBe(null);
+            data.TheImportantMessage.ShouldBe("Times up");
+        }
+
         public override string GetEndpointFor(Type messageType)
         {
-            if (messageType == typeof(TimeoutRequest))
+            if (typeof(TimeoutRequest).IsAssignableFrom(messageType))
             {
                 return timeoutService.InputQueue;
             }
 
             return base.GetEndpointFor(messageType);
+        }
+
+        public class SomeData
+        {
+            public string TheImportantMessage { get; set; }
         }
     }
 }
