@@ -19,5 +19,11 @@ namespace Rebus.Messages
         /// return with the <see cref="TimeoutReply"/>.
         /// </summary>
         public string CorrelationId { get; set; }
+
+        /// <summary>
+        /// Allows for specifying payload data that the Timeout Service will
+        /// return with the <see cref="TimeoutReply"/>.
+        /// </summary>
+        public string Data { get; set; }
     }
 }

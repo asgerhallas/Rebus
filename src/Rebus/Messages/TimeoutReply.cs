@@ -17,5 +17,10 @@ namespace Rebus.Messages
         /// The correlation ID as specified in the <see cref="TimeoutRequest"/>.
         /// </summary>
         public string CorrelationId { get; set; }
+
+        /// <summary>
+        /// Payload data as given in the <see cref="TimeoutRequest"/>
+        /// </summary>
+        public object Data { get; set; }
     }
 }
